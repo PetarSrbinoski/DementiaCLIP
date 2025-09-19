@@ -1,0 +1,114 @@
+# ----------------------------
+# Python Bytecode / Cache
+# ----------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ----------------------------
+# Virtual Environments
+# ----------------------------
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ----------------------------
+# IDE / Editor
+# ----------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ----------------------------
+# OS Generated Files
+# ----------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+._*
+.Trashes
+.Spotlight-V100
+
+# ----------------------------
+# Logs
+# ----------------------------
+*.log
+logs/
+
+# ----------------------------
+# ML / Model Files
+# ----------------------------
+*.pth
+*.pt
+*.bin
+*.h5
+*.keras
+models/checkpoints/
+models/*.pth
+models/*.pt
+
+# ----------------------------
+# Data Files (keep structure but ignore contents)
+# ----------------------------
+Data/**/raw/*
+Data/**/cleaned/*
+*.csv
+*.tsv
+*.json
+*.parquet
+*.feather
+Data/audio/**/*
+Data/text/**/*.cha
+   #raw or processed audio files
+
+# ----------------------------
+# Generated Outputs
+# ----------------------------
+Outputs/spectrograms/*.png
+Outputs/spectrograms/*.jpg
+Outputs/spectrograms/*.npy
+Outputs/logs/
+
+# ----------------------------
+# Config & Secrets
+# ----------------------------
+config.yaml
+config.yml
+*.env
+.secrets
+
+# ----------------------------
+# Jupyter Notebooks
+# ----------------------------
+.ipynb_checkpoints
+*.ipynb
+
+# ----------------------------
+# Temporary / Backup Files
+# ----------------------------
+*.tmp
+*.temp
+*.zip
+*.tar
+*.gz
+*.7z
+*.rar
+
+# ----------------------------
+# Python Test / Coverage
+# ----------------------------
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# ----------------------------
+# Keep empty folders tracked
+# ----------------------------
+!Data/**/.gitkeep
+!Outputs/**/.gitkeep
