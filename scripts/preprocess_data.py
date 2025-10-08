@@ -1,4 +1,4 @@
-from scripts import config
+# scripts/preprocess_data.py
 import re
 import pylangacq
 import pandas as pd
@@ -6,35 +6,78 @@ import librosa
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-import torch
-from torchaudio import transforms as T
 from pathlib import Path
 from collections import defaultdict
+import nltk
+import parselmouth
+from parselmouth.praat import call
+
+from scripts import config
 
 
+def extract_demographics(cha_path):
+    """Parses a .cha file header to extract age and sex."""
+    try:
+        reader = pylangacq.read_chat(cha_path)
+        id_header = reader.headers().get("ID", "")
+        parts = id_header.split('|')
+        if len(parts) >= 5:
+            age_str = parts[3].replace(';', '.')  # Format like '67;00.' -> 67.0
+            age = int(float(age_str))
+            sex = parts[4]
+            return age, sex
+    except Exception:
+        return None, None
+    return None, None
+
+
+def extract_linguistic_features(transcript):
+    """Calculates Type-Token Ratio from a transcript."""
+    try:
+        tokens = nltk.word_tokenize(transcript.lower())
+        if not tokens:
+            return 0.0
+        unique_tokens = set(tokens)
+        ttr = len(unique_tokens) / len(tokens)
+        return ttr
+    except Exception:
+        return 0.0
+
+
+def extract_acoustic_features(audio_waveform, sr):
+    """Calculates pause, speech rate, and pitch features."""
+    try:
+        # Load audio into parselmouth
+        sound = parselmouth.Sound(audio_waveform, sampling_frequency=sr)
+
+        # 1. Pause analysis
+        intensity = sound.to_intensity()
+        silences = call(intensity, "Get intervals where...", 0.0, 0.0, "less than", -25, "equalTo", "silent")
+        pause_count = call(silences, "Get number of intervals")
+        total_pause_duration = call(silences, "Get total duration")
+
+        # 2. Pitch variation (F0 stddev)
+        pitch = sound.to_pitch()
+        f0_stddev = call(pitch, "Get standard deviation", 0, 0, "Hertz")
+
+        return pause_count, total_pause_duration, f0_stddev
+    except Exception:
+        # Return default values if audio is too short or silent
+        return 0, 0.0, 0.0
+
+
+# --- Existing Helper Functions (Unchanged) ---
+# ... extract_clean_transcript, create_spectrogram ...
 def extract_clean_transcript(cha_path):
     try:
         reader = pylangacq.read_chat(cha_path)
         words = reader.words(participants="PAR")
         transcript = " ".join(words)
-        transcript = re.sub(r'\[\s*\+\s*.*?\]', '', transcript)
+        transcript = re.sub(r'\[.*?\]', '', transcript)
         transcript = re.sub(r'&\w+', '', transcript)
         return re.sub(r'\s+', ' ', transcript).strip()
-    except Exception as e:
-        print(f"Error processing transcript for {cha_path}: {e}")
-        return ""
-
-
-def extract_mmse(cha_path):
-    try:
-        reader = pylangacq.read_chat(cha_path)
-        id_header = reader.headers().get("ID", "")
-        if not id_header or len(parts := id_header.split('|')) < 7:
-            return np.nan
-        mmse_str = parts[6].strip()
-        return int(mmse_str) if mmse_str.isdigit() else np.nan
     except Exception:
-        return np.nan
+        return ""
 
 
 def create_spectrogram(audio_waveform, sr, save_path):
@@ -43,96 +86,85 @@ def create_spectrogram(audio_waveform, sr, save_path):
         mel_spec = librosa.feature.melspectrogram(y=y_trimmed, sr=sr, n_fft=config.N_FFT, hop_length=config.HOP_LENGTH,
                                                   n_mels=config.N_MELS)
         log_mel_spec = librosa.power_to_db(mel_spec, ref=np.max)
-        log_mel_spec_tensor = torch.from_numpy(log_mel_spec).unsqueeze(0)
-        spec_transform = torch.nn.Sequential(T.FrequencyMasking(freq_mask_param=15), T.TimeMasking(time_mask_param=35))
-        log_mel_spec = spec_transform(log_mel_spec_tensor).squeeze(0).numpy()
         norm_spec = (log_mel_spec - log_mel_spec.min()) / (log_mel_spec.max() - log_mel_spec.min())
         spec_rgb = np.stack([norm_spec] * 3, axis=-1)
         plt.imsave(save_path, spec_rgb, cmap='viridis', origin='lower')
         return True
-    except Exception as e:
-        print(f"Error creating spectrogram: {e}")
+    except Exception:
         return False
 
 
+# --- Main Function (Updated to use new feature extractors) ---
+
 def main():
-    print("Starting preprocessing for split files\n")
-    for path in [config.OUTPUTS_DIR, config.SPECTROGRAM_DIR, config.TRANSCRIPT_DIR, config.MODEL_SAVE_DIR,
-                 config.LOG_DIR]:
+    print("Starting data preprocessing with feature extraction...")
+    # (Setup directories...)
+    for path in [config.OUTPUTS_DIR, config.SPECTROGRAM_DIR, config.TRANSCRIPT_DIR]:
         path.mkdir(exist_ok=True)
 
     metadata_list = []
-
     data_sources = [
         {"text_dir": config.TEXT_CONTROL_DIR, "audio_dir": config.AUDIO_CONTROL_DIR, "label": 0, "group": "Control"},
         {"text_dir": config.TEXT_DEMENTIA_DIR, "audio_dir": config.AUDIO_DEMENTIA_DIR, "label": 1, "group": "Dementia"}
     ]
 
     for source in data_sources:
-        gr_name = source["group"]
-        print(f"rocessing group: {gr_name} \n")
+        group_name, group_label = source["group"], source["label"]
+        print(f"\nProcessing group: {group_name}")
 
-        # group all file parts by id
         participant_files = defaultdict(list)
-        all_cha_files = source["text_dir"].glob('*-*.cha')
-        for cha_path in all_cha_files:
+        for cha_path in source["text_dir"].glob('*-*.cha'):
             participant_id = cha_path.stem.split('-')[0]
             participant_files[participant_id].append(cha_path)
 
-        # process each participant
-
-        for pid, cha_paths in participant_files.items():
+        for pid, cha_paths in tqdm(participant_files.items(), desc=f"Processing {group_name} participants"):
             cha_paths.sort()
 
-            # join the transcript parts
+            # --- Concatenate Audio and Text (Same as before) ---
             full_transcript = " ".join([extract_clean_transcript(p) for p in cha_paths])
-
-            # join the audio parts
-            concat_audio = []
+            concatenated_audio = []
             for path in cha_paths:
                 wav_path = source["audio_dir"] / f"{path.stem}.wav"
                 if wav_path.exists():
                     y, _ = librosa.load(wav_path, sr=config.SR)
-                    concat_audio.append(y)
-                else:
-                    print(f"Missing audio part {wav_path.name}")
-            if not concat_audio:
-                print(f"No audio found for participant {pid}.")
-                continue
+                    concatenated_audio.append(y)
+            if not concatenated_audio: continue
+            full_audio_waveform = np.concatenate(concatenated_audio)
 
-            full_audio_wav = np.concatenate(concat_audio)
+            # --- NEW: Extract and Add Features ---
+            age, sex = extract_demographics(cha_paths[0])
+            ttr = extract_linguistic_features(full_transcript)
+            pause_count, pause_duration, f0_stddev = extract_acoustic_features(full_audio_waveform, config.SR)
 
-            # get metadata
-            mmse = extract_mmse(cha_paths[0])
-            if pd.isna(mmse):
-                print(f"Could not extract valid MMSE for {pid}.")
-                continue
-
-            # save the transcript
+            # --- Save files and build metadata row ---
             transcript_path = config.TRANSCRIPT_DIR / f"{pid}.txt"
             transcript_path.write_text(full_transcript, encoding='utf-8')
 
-            # make and save spectrogram from full audio file
             spectrogram_path = config.SPECTROGRAM_DIR / f"{pid}.png"
-            success = create_spectrogram(full_audio_wav, config.SR, str(spectrogram_path))
-
-            if success:
+            if create_spectrogram(full_audio_waveform, config.SR, str(spectrogram_path)):
                 metadata_list.append({
                     "participant_id": pid,
-                    "label": source["lavel"],
-                    "mmse": mmse,
+                    "label": group_label,
+                    "age": age,
+                    "sex": sex,
+                    "type_token_ratio": ttr,
+                    "pause_count": pause_count,
+                    "total_pause_duration": pause_duration,
+                    "pitch_variation": f0_stddev,
                     "transcript_path": str(transcript_path),
                     "spectrogram_path": str(spectrogram_path)
                 })
 
-            #make and save final metadata csv
-            df = pd.DataFrame(metadata_list)
-            df['mmse'] = df['mmse'].astype(int)
-
-            df.to_csv(config.METADATA_FILE, index=False)
-            print(f"\nPreprocessing complete. Metadata saved to {config.METADATA_FILE}")
-            print(f"Found {len(df)} complete participant sessions.")
+    df = pd.DataFrame(metadata_list).dropna()  # Drop rows where features couldn't be extracted
+    df.to_csv(config.METADATA_FILE, index=False)
+    print(f"\nPreprocessing complete. Enriched metadata saved to {config.METADATA_FILE}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # Ensure NLTK data is available
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except nltk.downloader.DownloadError:
+        print("Downloading NLTK 'punkt' tokenizer...")
+        nltk.download('punkt')
     main()
