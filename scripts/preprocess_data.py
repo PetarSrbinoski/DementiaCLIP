@@ -15,16 +15,16 @@ from parselmouth.praat import call
 from scripts import config
 
 
+# Extract features
 def extract_demographics(cha_path):
-    """Parses a .cha file header to extract age and sex."""
     try:
         reader = pylangacq.read_chat(cha_path)
         id_header = reader.headers().get("ID", "")
         parts = id_header.split('|')
         if len(parts) >= 5:
-            age_str = parts[3].replace(';', '.')  # Format like '67;00.' -> 67.0
-            age = int(float(age_str))
-            sex = parts[4]
+            age_str = parts[3].replace(';', '.')
+            age = int(float(age_str)) if age_str and age_str != '.' else None
+            sex = parts[4] if parts[4] else None
             return age, sex
     except Exception:
         return None, None
@@ -32,42 +32,30 @@ def extract_demographics(cha_path):
 
 
 def extract_linguistic_features(transcript):
-    """Calculates Type-Token Ratio from a transcript."""
     try:
         tokens = nltk.word_tokenize(transcript.lower())
-        if not tokens:
-            return 0.0
+        if not tokens: return 0.0
         unique_tokens = set(tokens)
-        ttr = len(unique_tokens) / len(tokens)
-        return ttr
+        return len(unique_tokens) / len(tokens)
     except Exception:
         return 0.0
 
 
 def extract_acoustic_features(audio_waveform, sr):
-    """Calculates pause, speech rate, and pitch features."""
     try:
-        # Load audio into parselmouth
         sound = parselmouth.Sound(audio_waveform, sampling_frequency=sr)
-
-        # 1. Pause analysis
         intensity = sound.to_intensity()
         silences = call(intensity, "Get intervals where...", 0.0, 0.0, "less than", -25, "equalTo", "silent")
         pause_count = call(silences, "Get number of intervals")
         total_pause_duration = call(silences, "Get total duration")
-
-        # 2. Pitch variation (F0 stddev)
         pitch = sound.to_pitch()
         f0_stddev = call(pitch, "Get standard deviation", 0, 0, "Hertz")
-
         return pause_count, total_pause_duration, f0_stddev
     except Exception:
-        # Return default values if audio is too short or silent
         return 0, 0.0, 0.0
 
 
-# --- Existing Helper Functions (Unchanged) ---
-# ... extract_clean_transcript, create_spectrogram ...
+# Helper
 def extract_clean_transcript(cha_path):
     try:
         reader = pylangacq.read_chat(cha_path)
@@ -94,13 +82,11 @@ def create_spectrogram(audio_waveform, sr, save_path):
         return False
 
 
-# --- Main Function (Updated to use new feature extractors) ---
-
+# Main
 def main():
     print("Starting data preprocessing with feature extraction...")
-    # (Setup directories...)
-    for path in [config.OUTPUTS_DIR, config.SPECTROGRAM_DIR, config.TRANSCRIPT_DIR]:
-        path.mkdir(exist_ok=True)
+    for path in [config.OUTPUTS_DIR, config.SPECTROGRAM_DIR, config.TRANSCRIPT_DIR, config.MODEL_SAVE_DIR]:
+        path.mkdir(exist_ok=True, parents=True)
 
     metadata_list = []
     data_sources = [
@@ -120,7 +106,6 @@ def main():
         for pid, cha_paths in tqdm(participant_files.items(), desc=f"Processing {group_name} participants"):
             cha_paths.sort()
 
-            # --- Concatenate Audio and Text (Same as before) ---
             full_transcript = " ".join([extract_clean_transcript(p) for p in cha_paths])
             concatenated_audio = []
             for path in cha_paths:
@@ -131,40 +116,29 @@ def main():
             if not concatenated_audio: continue
             full_audio_waveform = np.concatenate(concatenated_audio)
 
-            # --- NEW: Extract and Add Features ---
             age, sex = extract_demographics(cha_paths[0])
             ttr = extract_linguistic_features(full_transcript)
             pause_count, pause_duration, f0_stddev = extract_acoustic_features(full_audio_waveform, config.SR)
 
-            # --- Save files and build metadata row ---
             transcript_path = config.TRANSCRIPT_DIR / f"{pid}.txt"
             transcript_path.write_text(full_transcript, encoding='utf-8')
-
             spectrogram_path = config.SPECTROGRAM_DIR / f"{pid}.png"
             if create_spectrogram(full_audio_waveform, config.SR, str(spectrogram_path)):
                 metadata_list.append({
-                    "participant_id": pid,
-                    "label": group_label,
-                    "age": age,
-                    "sex": sex,
-                    "type_token_ratio": ttr,
-                    "pause_count": pause_count,
-                    "total_pause_duration": pause_duration,
-                    "pitch_variation": f0_stddev,
-                    "transcript_path": str(transcript_path),
-                    "spectrogram_path": str(spectrogram_path)
+                    "participant_id": pid, "label": group_label, "age": age, "sex": sex,
+                    "type_token_ratio": ttr, "pause_count": pause_count,
+                    "total_pause_duration": pause_duration, "pitch_variation": f0_stddev,
+                    "transcript_path": str(transcript_path), "spectrogram_path": str(spectrogram_path)
                 })
 
-    df = pd.DataFrame(metadata_list).dropna()  # Drop rows where features couldn't be extracted
+    df = pd.DataFrame(metadata_list).dropna().reset_index(drop=True)
     df.to_csv(config.METADATA_FILE, index=False)
     print(f"\nPreprocessing complete. Enriched metadata saved to {config.METADATA_FILE}")
 
 
 if __name__ == "__main__":
-    # Ensure NLTK data is available
     try:
         nltk.data.find('tokenizers/punkt')
     except nltk.downloader.DownloadError:
-        print("Downloading NLTK 'punkt' tokenizer...")
         nltk.download('punkt')
     main()
