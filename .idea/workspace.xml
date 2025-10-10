@@ -5,11 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="df9bb3b3-8517-400f-ba97-3d663e8441f3" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/scripts/experiment_tracker.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/scripts/run_all_models.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scripts/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scripts/preprocess_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/preprocess_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/run_all_models.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/run_all_models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scripts/train_classifier.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/train_classifier.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -91,6 +91,7 @@
       <workItem from="1760018655244" duration="837000" />
       <workItem from="1760019614812" duration="15393000" />
       <workItem from="1760102734037" duration="3671000" />
+      <workItem from="1760106450465" duration="8854000" />
     </task>
     <servers />
   </component>
