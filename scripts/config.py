@@ -30,10 +30,10 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # =========================
 # CLIP backbone
-# (Switched to ViT-B/32 + LAION2B, tends to adapt better on small data)
 # =========================
-CLIP_MODEL_NAME = "ViT-B-32"
-CLIP_PRETRAINED = "laion2b_s34b_b79k"  # was "openai"
+# Switch to ViT-B/16. The LAION2B tag below is widely used and stable.
+CLIP_MODEL_NAME = "ViT-B-16"
+CLIP_PRETRAINED = "laion2b_s34b_b88k"
 
 # =========================
 # Audio / Spectrogram (speech-centric)
@@ -43,7 +43,7 @@ N_MELS       = 80      # speech-friendly
 N_FFT        = 400     # ~25 ms @16k
 HOP_LENGTH   = 160     # ~10 ms @16k
 TRIM_TOP_DB  = 25
-IMG_SIZE     = (224, 224)
+IMG_SIZE     = (224, 224)  # open_clip transform will handle final resize/crop
 
 # =========================
 # Training
@@ -56,16 +56,18 @@ RANDOM_STATE      = 42
 EPOCHS_VISION     = 16
 EPOCHS_MULTIMODAL = 20
 
-# Learning rates
-LR_VISION         = 7e-4          # head LR for vision-only
-LR_MULTIMODAL     = 1e-3          # ↑ bumped per your request
+# Learning rates (conservative for small data)
+LR_VISION         = 5e-4
+LR_MULTIMODAL     = 5e-4
 
 # Fine-tuning policy
-FREEZE_CLIP       = True          # start frozen for stability
-FREEZE_EPOCHS     = 5             # was 3; small data benefits from longer warmup
-CLIP_LR_MULT      = 0.1           # CLIP gets smaller LR than the head
+FREEZE_CLIP          = True     # start frozen for stability
+FREEZE_EPOCHS        = 8        # longer warmup worked best for you
+CLIP_LR_MULT         = 0.05     # CLIP gets 20x smaller LR than the heads
+PARTIAL_UNFREEZE_K   = 2        # unfreeze last K visual blocks after warmup
 
 # Regularization / optimization
-USE_CLASS_WEIGHTS = True
-LABEL_SMOOTHING   = 0.05          # gentle; helps small datasets
-EARLY_STOP_PATIENCE = 8           # allow more epochs to improve before stopping
+USE_CLASS_WEIGHTS   = True
+LABEL_SMOOTHING     = 0.05
+EARLY_STOP_PATIENCE = 6
+WEIGHT_DECAY        = 0.03

@@ -73,6 +73,7 @@ Outputs/spectrograms/*.png
 Outputs/spectrograms/*.jpg
 Outputs/spectrograms/*.npy
 Outputs/transcripts/*.txt
+Outputs/experiments/*
 Outputs/logs/
 
 # ----------------------------

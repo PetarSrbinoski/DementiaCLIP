@@ -5,7 +5,7 @@ import argparse
 import os
 import random
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -53,14 +53,37 @@ def print_hardware_header() -> str:
 
 
 # ============================================================
+# Feature selection (from new metadata)
+# ============================================================
+# Numeric columns we prefer to use, if present in metadata
+PREFERRED_NUMERIC_COLS = [
+    "pause_count",
+    "total_pause_duration",
+    "avg_pause_duration",
+    "speech_rate_wps",
+    "type_token_ratio",
+    "disfluency_rate",
+    "repair_rate",
+    "mlu_words",
+    "age",              # optional; included if present
+]
+
+# Categorical demo feature: 'sex' -> one-hot (M/F). Anything else -> "other/unknown".
+SEX_COL = "sex"
+SEX_CLASSES = ("male", "female")  # everything else becomes 'other' (ignored one-hot)
+
+
+def pick_available_columns(df: pd.DataFrame) -> Tuple[List[str], bool]:
+    """Return (numeric_cols_available, has_sex)."""
+    numeric_cols = [c for c in PREFERRED_NUMERIC_COLS if c in df.columns]
+    has_sex = SEX_COL in df.columns
+    return numeric_cols, has_sex
+
+
+# ============================================================
 # Dataset
 # ============================================================
-# NOTE: keep these 4 until you rerun the new preprocessing.
-# After you rerun, you can switch to the better set (pause_count, total_pause_duration, speech_rate_wps, type_token_ratio).
-CLINICAL_COLS = ["pause_count", "total_pause_duration", "speech_rate_wps", "type_token_ratio"]
-
-
-def _shrink_text(txt: str, max_words: int = 256) -> str:
+def _shrink_text(txt: str, max_words: int = 128) -> str:
     """Shorten transcript to avoid CLIP tokenizer truncation."""
     if not txt:
         return ""
@@ -69,13 +92,26 @@ def _shrink_text(txt: str, max_words: int = 256) -> str:
 
 
 class DementiaDataset(Dataset):
-    """Loads spectrogram, transcript, and clinical features."""
+    """
+    Loads spectrogram (image), transcript (raw string; tokenized per batch),
+    and structured clinical/demo features (scaled numeric + one-hot sex).
+    """
 
-    def __init__(self, df: pd.DataFrame, clip_preprocess, scaler: StandardScaler):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        clip_preprocess,
+        numeric_cols: List[str],
+        scaler: StandardScaler,
+        include_sex: bool,
+    ):
         self.df = df.reset_index(drop=True)
         self.preprocess = clip_preprocess
+        self.numeric_cols = numeric_cols
         self.scaler = scaler
+        self.include_sex = include_sex
 
+        # Text (CLIP caption already saved in transcripts)
         self.transcripts = []
         for path in self.df["transcript_path"]:
             try:
@@ -83,12 +119,35 @@ class DementiaDataset(Dataset):
                     txt = f.read()
             except Exception:
                 txt = ""
-            self.transcripts.append(_shrink_text(txt, max_words=256))
+            self.transcripts.append(_shrink_text(txt, max_words=128))
 
-        features = self.df[CLINICAL_COLS].fillna(0).values.astype(np.float32)
-        self.norm_feats = self.scaler.transform(features)
+        # Images
         self.image_paths = self.df["spectrogram_path"].tolist()
+
+        # Labels
         self.labels = self.df["label"].astype(int).to_numpy()
+
+        # Structured features
+        # 1) Numeric block (scaled)
+        if self.numeric_cols:
+            X_num = self.df[self.numeric_cols].copy()
+        else:
+            X_num = pd.DataFrame(index=self.df.index)
+        X_num = X_num.fillna(0.0).astype(np.float32)
+
+        X_num_scaled = self.scaler.transform(X_num.values) if self.numeric_cols else np.zeros((len(self.df), 0), dtype=np.float32)
+
+        # 2) One-hot block for sex (M/F), ignore 'other'
+        if self.include_sex:
+            sex_series = self.df[SEX_COL].fillna("").astype(str).str.lower()
+            sex_m = (sex_series == "male").astype(np.float32).values.reshape(-1, 1)
+            sex_f = (sex_series == "female").astype(np.float32).values.reshape(-1, 1)
+            X_cat = np.concatenate([sex_m, sex_f], axis=1).astype(np.float32)
+        else:
+            X_cat = np.zeros((len(self.df), 0), dtype=np.float32)
+
+        # Final features
+        self.features = np.concatenate([X_num_scaled, X_cat], axis=1).astype(np.float32)
 
     def __len__(self):
         return len(self.df)
@@ -96,8 +155,10 @@ class DementiaDataset(Dataset):
     def __getitem__(self, idx):
         img = Image.open(self.image_paths[idx]).convert("RGB")
         img_tensor = self.preprocess(img)
-        transcript = self.transcripts[idx]  # return the raw text string (we'll tokenize per batch)
-        clinical = torch.from_numpy(self.norm_feats[idx])
+
+        transcript = self.transcripts[idx]  # raw text string (tokenize per batch)
+        clinical = torch.from_numpy(self.features[idx])
+
         label = torch.tensor(self.labels[idx], dtype=torch.long)
         return img_tensor, transcript, clinical, label
 
@@ -154,13 +215,13 @@ class MultimodalClassifierBasic(nn.Module):
 
 
 class MultimodalClassifierFull(nn.Module):
-    """Spectrogram + transcript + clinical"""
+    """Spectrogram + transcript + clinical/demo (variable dim)"""
 
-    def __init__(self, clip_model):
+    def __init__(self, clip_model, clin_dim: int):
         super().__init__()
         self.clip_model = clip_model
         embed_dim = clip_model.visual.output_dim
-        self.proj_clin = nn.Sequential(nn.Linear(4, 64), nn.ReLU(), nn.LayerNorm(64))
+        self.proj_clin = nn.Sequential(nn.Linear(clin_dim, 64), nn.ReLU(), nn.LayerNorm(64))
         self.norm = nn.LayerNorm(embed_dim * 2 + 64)
         self.head = nn.Sequential(
             nn.Linear(embed_dim * 2 + 64, 512),
@@ -188,15 +249,26 @@ def set_finetune(clip_model, finetune: bool):
         p.requires_grad = finetune
 
 
-def set_partial_finetune_last_block(clip_model):
-    """Unfreeze last visual block + LayerNorms (gentle fine-tune)."""
+def set_partial_finetune_last_k_blocks(clip_model, k: int = 2):
+    """
+    Unfreeze the last K visual transformer blocks + all LayerNorms.
+    Safer than full unfreeze on small datasets.
+    """
     for p in clip_model.parameters():
         p.requires_grad = False
+    # Visual encoder blocks (ViT)
     try:
-        for p in clip_model.visual.transformer.resblocks[-1].parameters():
-            p.requires_grad = True
+        blocks = clip_model.visual.transformer.resblocks
+        for b in blocks[-k:]:
+            for p in b.parameters():
+                p.requires_grad = True
     except Exception:
-        pass
+        try:
+            for p in clip_model.visual.transformer.resblocks[-1].parameters():
+                p.requires_grad = True
+        except Exception:
+            pass
+    # Always unfreeze LayerNorms
     for m in clip_model.modules():
         if isinstance(m, torch.nn.LayerNorm):
             for p in m.parameters():
@@ -221,32 +293,49 @@ class FoldConfig:
     use_amp: bool
     label_smoothing: float
     num_workers: int
+    partial_unfreeze_k: int
+    weight_decay: float
+    clin_dim: int  # <- dynamic clinical/demo feature dimension
 
 
 def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
     print(f"\n--- Fold {fold_idx + 1}/{config.N_SPLITS} ---")
     print("Initializing model and data...", flush=True)
 
-    # IMPORTANT: force_quick_gelu=True to match 'openai' weights and remove the warning
+    # Create CLIP model & transforms
     clip_model, _, preprocess = open_clip.create_model_and_transforms(
         config.CLIP_MODEL_NAME,
         pretrained=config.CLIP_PRETRAINED,
         device=config.DEVICE,
-        force_quick_gelu=True,
     )
     tokenizer = open_clip.get_tokenizer(config.CLIP_MODEL_NAME)
 
-    scaler = StandardScaler().fit(train_df[CLINICAL_COLS].fillna(0).values)
-    train_ds = DementiaDataset(train_df, preprocess, scaler)
-    val_ds = DementiaDataset(val_df, preprocess, scaler)
+    # Feature selection for this fold (train-based to avoid leakage of scaler stats)
+    numeric_cols, has_sex = pick_available_columns(train_df)
 
-    # WEIGHTED sampler (training only)
+    # Fit scaler on training numeric block
+    if numeric_cols:
+        scaler = StandardScaler().fit(train_df[numeric_cols].fillna(0.0).values.astype(np.float32))
+    else:
+        # dummy scaler (won't be used)
+        scaler = StandardScaler()
+        scaler.mean_ = np.array([], dtype=np.float32)
+        scaler.scale_ = np.array([], dtype=np.float32)
+        scaler.n_features_in_ = 0
+
+    # Build datasets/loaders
+    train_ds = DementiaDataset(train_df, preprocess, numeric_cols, scaler, include_sex=has_sex)
+    val_ds   = DementiaDataset(val_df,   preprocess, numeric_cols, scaler, include_sex=has_sex)
+
+    clin_dim = train_ds.features.shape[1]  # dynamic clinical dimension for this fold
+
+    # Weighted sampler (training only)
     class_counts = train_df["label"].value_counts()
     weights = train_df["label"].map({0: 1.0 / class_counts[0], 1: 1.0 / class_counts[1]}).values
     sampler = WeightedRandomSampler(weights=weights, num_samples=len(weights), replacement=True)
 
     train_loader = DataLoader(train_ds, batch_size=config.BATCH_SIZE, sampler=sampler, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=0)
+    val_loader   = DataLoader(val_ds,   batch_size=config.BATCH_SIZE, shuffle=False, num_workers=0)
 
     # Build model
     if cfg.mode == "vision_only":
@@ -254,7 +343,7 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
     elif cfg.mode == "multimodal_basic":
         model = MultimodalClassifierBasic(clip_model)
     else:
-        model = MultimodalClassifierFull(clip_model)
+        model = MultimodalClassifierFull(clip_model, clin_dim=clin_dim)
     model = model.to(config.DEVICE)
 
     # Freeze CLIP initially
@@ -266,6 +355,7 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
         print("Fine-tuning CLIP: Yes (from start)")
 
     print(f"Batch size: {config.BATCH_SIZE}")
+    print(f"Clinical feature dim: {clin_dim}")
     print(f"Trainable params: {_count_trainable(model):,}")
 
     # Loss & Optimizer
@@ -285,7 +375,7 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
             {"params": model.clip_model.parameters(), "lr": cfg.lr * cfg.clip_lr_mult},
             {"params": [p for n, p in model.named_parameters() if not n.startswith("clip_model.")], "lr": cfg.lr},
         ],
-        weight_decay=0.02,
+        weight_decay=cfg.weight_decay,
     )
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
     scaler_amp = amp.GradScaler(device="cuda", enabled=cfg.use_amp)
@@ -295,9 +385,10 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
     stale = 0
 
     for epoch in range(cfg.epochs):
+        # Partial unfreeze after warmup
         if cfg.freeze_epochs > 0 and epoch == cfg.freeze_epochs:
-            set_partial_finetune_last_block(model.clip_model)
-            print(f"Epoch {epoch + 1}: Partially unfroze CLIP (last block + LayerNorms).")
+            set_partial_finetune_last_k_blocks(model.clip_model, k=cfg.partial_unfreeze_k)
+            print(f"Epoch {epoch + 1}: Partially unfroze CLIP (last {cfg.partial_unfreeze_k} blocks + all LayerNorms).")
 
         # ---- Train ----
         model.train()
@@ -307,7 +398,6 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
             clinical = clinical.to(config.DEVICE)
             labels = labels.to(config.DEVICE)
 
-            # ✅ FIX: tokenize PER BATCH so texts match images from the sampler
             if cfg.mode != "vision_only":
                 text_tokens = tokenizer(list(texts)).to(config.DEVICE)
 
@@ -367,10 +457,7 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
             flush=True,
         )
 
-        tracker.log_message(
-            f"[Fold {fold_idx + 1}][Epoch {epoch + 1}] train_loss={avg_train:.4f} "
-            f"val_loss={avg_val:.4f} acc={acc:.4f} f1={f1:.4f} roc_auc={roc:.4f}"
-        )
+        # tracker.log_message(...)  # optional
 
         if avg_val < best_val:
             best_val, stale = avg_val, 0
@@ -379,6 +466,7 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
             if stale >= patience:
                 print(f"Early stopping at epoch {epoch + 1}")
                 break
+
         scheduler.step()
 
     return {"acc": acc, "f1": f1, "roc_auc": roc}
@@ -387,8 +475,23 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
 # ============================================================
 # Main
 # ============================================================
+@dataclass
+class FoldArgs:
+    mode: str
+    epochs: int
+    lr: float
+    clip_lr_mult: float
+    freeze_epochs: int
+    use_class_weights: bool
+    use_amp: bool
+    label_smoothing: float
+    num_workers: int
+    partial_unfreeze_k: int
+    weight_decay: float
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Train Dementia CLIP classifier")
+    parser = argparse.ArgumentParser(description="Train Dementia CLIP classifier (rich clinical/demo features)")
     parser.add_argument("--mode", type=str, required=True,
                         choices=["vision_only", "multimodal_basic", "multimodal_full"])
     args = parser.parse_args()
@@ -400,7 +503,7 @@ def main():
     df = pd.read_csv(config.METADATA_FILE)
     tracker = ExperimentTracker(experiment_name=f"CLIP_{config.CLIP_MODEL_NAME}_finetune", mode=args.mode)
 
-    fold_cfg = FoldConfig(
+    fold_base = FoldArgs(
         mode=args.mode,
         epochs=config.EPOCHS_MULTIMODAL if args.mode != "vision_only" else config.EPOCHS_VISION,
         lr=config.LR_MULTIMODAL if args.mode != "vision_only" else config.LR_VISION,
@@ -410,13 +513,25 @@ def main():
         use_amp=(config.DEVICE == "cuda"),
         label_smoothing=getattr(config, "LABEL_SMOOTHING", 0.0),
         num_workers=min(8, os.cpu_count() or 0),
+        partial_unfreeze_k=getattr(config, "PARTIAL_UNFREEZE_K", 2),
+        weight_decay=getattr(config, "WEIGHT_DECAY", 0.03),
     )
 
     skf = StratifiedKFold(n_splits=config.N_SPLITS, shuffle=True, random_state=config.RANDOM_STATE)
     fold_metrics = []
 
     for i, (tr, va) in enumerate(skf.split(df, df["label"])):
-        metrics = run_fold(i, df.iloc[tr], df.iloc[va], fold_cfg, tracker)
+
+        # Determine clinical/demo dimension for this fold from train split
+        numeric_cols, has_sex = pick_available_columns(df.iloc[tr])
+        clin_dim = len(numeric_cols) + (2 if has_sex else 0)
+
+        cfg = FoldConfig(
+            **fold_base.__dict__,
+            clin_dim=clin_dim,
+        )
+
+        metrics = run_fold(i, df.iloc[tr], df.iloc[va], cfg, tracker)
         fold_metrics.append(metrics)
         print(f"Fold {i + 1} - Acc: {metrics['acc']:.4f}, F1: {metrics['f1']:.4f}, ROC-AUC: {metrics['roc_auc']:.4f}")
 

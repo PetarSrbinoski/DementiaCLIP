@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 import config
+import torch  # <-- needed for torch.save
 
 
 class ExperimentTracker:
@@ -37,10 +38,52 @@ class ExperimentTracker:
             "training_config": {},
             "cv_metrics": [],
             "average_metrics": {},
-            "fold_models": []
+            "fold_models": [],
+            "repro": {}
         }
 
         self.cv_results = []
+
+        # Record git state if available
+        self._detect_git()
+
+    def _detect_git(self):
+        """Record current git commit (if available)."""
+        try:
+            import subprocess
+            commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(config.BASE_DIR)
+            ).decode().strip()
+            dirty = subprocess.call(
+                ["git", "diff", "--quiet"],
+                cwd=str(config.BASE_DIR)
+            ) != 0
+            self.results.setdefault("repro", {})["git_commit"] = commit
+            self.results["repro"]["git_dirty"] = bool(dirty)
+        except Exception:
+            self.results.setdefault("repro", {})["git_commit"] = None
+            self.results["repro"]["git_dirty"] = None
+
+    def snapshot_code(self):
+        """
+        Save a minimal code snapshot to the experiment folder for reproducibility.
+        Copies config.py and scripts/*.py.
+        """
+        (self.exp_dir / "code").mkdir(exist_ok=True)
+        try:
+            # copy config.py
+            cfg_src = config.BASE_DIR / "config.py"
+            if cfg_src.exists():
+                shutil.copy(cfg_src, self.exp_dir / "code" / "config.py")
+            # copy scripts
+            scripts_dir = config.BASE_DIR / "scripts"
+            dst = self.exp_dir / "code" / "scripts"
+            dst.mkdir(exist_ok=True)
+            for p in scripts_dir.glob("*.py"):
+                shutil.copy(p, dst / p.name)
+        except Exception:
+            pass
 
     def log_config(self, model_name, pretrained, clip_model_name, other_config=None):
         """Log model and training configuration"""
@@ -59,6 +102,8 @@ class ExperimentTracker:
             "n_splits": config.N_SPLITS,
             "random_state": config.RANDOM_STATE,
             "device": config.DEVICE,
+            "seed": int(config.RANDOM_STATE),
+            "device_visible": str(config.DEVICE),
             "total_samples": int(other_config.get("total_samples", 0)) if other_config else 0,
             "num_control": int(other_config.get("num_control", 0)) if other_config else 0,
             "num_dementia": int(other_config.get("num_dementia", 0)) if other_config else 0,
@@ -87,6 +132,20 @@ class ExperimentTracker:
 
         self.results["cv_metrics"].append(fold_result)
         self.cv_results.append(fold_result)
+
+    def log_fold_predictions(self, fold, y_true, y_prob, y_pred):
+        """
+        Save per-sample predictions for a fold.
+        y_true: list[int] (0/1), y_prob: list[float] (P(class=1)), y_pred: list[int] (0/1)
+        """
+        import pandas as pd
+        df = pd.DataFrame({
+            "y_true": y_true,
+            "y_prob": y_prob,
+            "y_pred": y_pred,
+        })
+        pred_path = self.exp_dir / f"fold_{fold + 1}_predictions.csv"
+        df.to_csv(pred_path, index=False)
 
     def log_average_metrics(self, avg_metrics_df):
         """Log cross-validation averages"""
@@ -182,6 +241,10 @@ RESULTS:
   Average F1-Score:  {self.results['average_metrics'].get('avg_f1_score', 0):.4f} ± {self.results['average_metrics'].get('std_f1_score', 0):.4f}
   Average ROC-AUC:   {self.results['average_metrics'].get('avg_roc_auc', 0):.4f} ± {self.results['average_metrics'].get('std_roc_auc', 0):.4f}
 
+Git:
+  Commit: {self.results.get('repro', {}).get('git_commit')}
+  Dirty:  {self.results.get('repro', {}).get('git_dirty')}
+
 FOLD DETAILS:
 """
         for fold_result in self.cv_results:
@@ -195,6 +258,14 @@ FOLD DETAILS:
         """Copy metadata file for reference"""
         if config.METADATA_FILE.exists():
             shutil.copy(config.METADATA_FILE, self.exp_dir / "metadata_used.csv")
+
+    def finalize(self, avg_metrics_df=None):
+        """Save results + CSV + code snapshot + print summary."""
+        if avg_metrics_df is not None:
+            self.log_average_metrics(avg_metrics_df)
+        self.save_results()
+        self.snapshot_code()
+        print(self.get_summary())
 
 
 # Utility function to create a report
