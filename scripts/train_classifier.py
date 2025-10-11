@@ -74,12 +74,12 @@ def print_hardware_header() -> str:
 
 
 # ======================DATASET======================================
-CLINICAL_COLS = [
-    "pause_count",
-    "total_pause_duration",
-    "speech_rate_wps",
-    "type_token_ratio",
-]
+# Build the clinical feature set dynamically from config
+_BASE_CLINICAL = ["pause_count", "total_pause_duration", "speech_rate_wps", "type_token_ratio"]
+_EXTRA_CLINICAL = ["avg_pause_duration", "mlu_words"]  # both exist in your metadata
+
+CLINICAL_COLS = _BASE_CLINICAL + _EXTRA_CLINICAL if getattr(config, "USE_EXTRA_CLINICAL", True) else _BASE_CLINICAL
+
 
 
 def _shrink_text(txt: str, max_words: int = 256) -> str:
@@ -181,7 +181,8 @@ class MultimodalClassifierFull(nn.Module):
         super().__init__()
         self.clip_model = clip_model
         embed_dim = clip_model.visual.output_dim
-        self.proj_clin = nn.Sequential(nn.Linear(4, 64), nn.ReLU(), nn.LayerNorm(64))
+        clin_in = len(CLINICAL_COLS)
+        self.proj_clin = nn.Sequential(nn.Linear(clin_in, 64), nn.ReLU(), nn.LayerNorm(64))
         self.norm = nn.LayerNorm(embed_dim * 2 + 64)
         self.head = nn.Sequential(
             nn.Linear(embed_dim * 2 + 64, 512),

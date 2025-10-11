@@ -14,6 +14,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
+.idea/
 
 # ----------------------------
 # IDE / Editor
@@ -23,6 +24,8 @@ venv.bak/
 *.swp
 *.swo
 *~
+*.csv
+
 
 # ----------------------------
 # OS Generated Files
@@ -57,7 +60,6 @@ models/*.pt
 # ----------------------------
 Data/**/raw/*
 Data/**/cleaned/*
-*.csv
 *.tsv
 *.json
 *.parquet
@@ -69,10 +71,8 @@ Data/text/**/*.cha
 # ----------------------------
 # Generated Outputs
 # ----------------------------
-Outputs/spectrograms/*.png
-Outputs/spectrograms/*.jpg
-Outputs/spectrograms/*.npy
-Outputs/transcripts/*.txt
+Outputs/spectrograms/*
+Outputs/transcripts/*
 Outputs/experiments/*
 Outputs/logs/
 

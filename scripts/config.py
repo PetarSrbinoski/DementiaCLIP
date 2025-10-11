@@ -41,7 +41,7 @@ IMG_SIZE     = (224, 224)  # open_clip transform will handle final resize/crop
 
 #======================== TRAINING PARAMS ======================================
 
-BATCH_SIZE        = 16
+BATCH_SIZE        = 16 #16/32
 N_SPLITS          = 5
 RANDOM_STATE      = 42
 
@@ -50,17 +50,19 @@ EPOCHS_VISION     = 16
 EPOCHS_MULTIMODAL = 20
 
 # Learning rates (conservative for small data)
-LR_VISION         = 5e-4
-LR_MULTIMODAL     = 5e-4
+LR_VISION         = 3e-4
+LR_MULTIMODAL     = 3e-4
 
 # Fine-tuning policy
 FREEZE_CLIP          = True     # start frozen for stability
-FREEZE_EPOCHS        = 10        # longer warmup worked best
-CLIP_LR_MULT         = 0.05     # CLIP gets 20x smaller LR than the heads
+FREEZE_EPOCHS        = 8       # longer warmup worked best
+CLIP_LR_MULT         = 0.05 #0.05    # CLIP gets 20x smaller LR than the heads
 PARTIAL_UNFREEZE_K   = 2        # unfreeze last K visual blocks after warmup
 
 # Regularization / optimization
 USE_CLASS_WEIGHTS   = True
 LABEL_SMOOTHING     = 0.05
-EARLY_STOP_PATIENCE = 6
+EARLY_STOP_PATIENCE = 8 #6
 WEIGHT_DECAY        = 0.03
+
+USE_EXTRA_CLINICAL = True #false
