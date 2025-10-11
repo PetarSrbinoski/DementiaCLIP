@@ -46,13 +46,11 @@ DISFLUENCY_TOKENS = {"uh", "um", "erm", "hmm"}  # we also map &-uh/&+ha/etc. →
 REPAIR_MARKERS = ["[/]", "[//]"]
 
 
-# ============================================================
-# Text cleaning & feature text / CLIP caption
-# ============================================================
+#========================== TEXT CLEANING ==============================================
 def clean_chat_text(raw: str) -> str:
     """
     Make a clean text for feature extraction (keep disfluency tokens as 'uh' for counting).
-    - Remove investigator lines, morphology/grammar tiers, timestamps, bracketed annotations.
+    - Remove investigator lines, timestamps, bracketed annotations.
     - Normalize CHAT & codes (&-uh, &=clears:throat) to 'uh'.
     - Normalize optional letters: windo(w) -> window, (o)kay -> okay
     """
@@ -64,13 +62,11 @@ def clean_chat_text(raw: str) -> str:
         if not line.startswith("%mor:") and not line.startswith("%gra:") and not line.startswith("%wor:")
     )
 
-    # Keep only participant utterances and @ headers if needed
+    # Keep only participant utterances and @ headers
     lines = []
     for line in s.splitlines():
         if line.startswith(PAR_TAG):
-            # strip the speaker marker
             lines.append(line[len(PAR_TAG):].strip())
-        # ignore investigator & other tiers
     s = "\n".join(lines)
 
     # Normalize CHAT "amp" codes to 'uh' (e.g., &=clears:throat, &-uh, &+ha)
@@ -198,9 +194,7 @@ def basic_text_features(clean_text: str, raw_text_for_repairs: str, utt_count: i
     }
 
 
-# ============================================================
-# Audio → spectrogram
-# ============================================================
+#============================== MAKE SPECTROGRAMS =======================================
 def make_mel_spectrogram_image(y: np.ndarray, sr: int, save_path: Path) -> bool:
     """
     Speech-centric mel-spectrogram:
@@ -269,9 +263,7 @@ def load_audio_for_paths(paths: List[Path], sr: int) -> np.ndarray:
     return np.concatenate(chunks).astype(np.float32)
 
 
-# ============================================================
-# Main preprocessing
-# ============================================================
+#========================================= MAIN ========================================
 def main():
     print("Starting preprocessing (CHAT → features + spectrograms)...")
 

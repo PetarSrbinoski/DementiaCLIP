@@ -2,14 +2,12 @@
 from pathlib import Path
 import torch
 
-# =========================
-# Paths
-# =========================
+#========================= PATHS ================================
 BASE_DIR = Path(__file__).parent.parent
 
 DATA_DIR = BASE_DIR / "Data"
 
-# Audio/text (Cookie task)
+# Audio/text
 AUDIO_CONTROL_DIR   = DATA_DIR / "audio" / "Control"   / "cookie" / "raw"
 AUDIO_DEMENTIA_DIR  = DATA_DIR / "audio" / "Dementia"  / "cookie" / "raw"
 TEXT_CONTROL_DIR    = DATA_DIR / "text"  / "Control"   / "cookie"
@@ -23,31 +21,26 @@ SPECTROGRAM_DIR  = OUTPUTS_DIR / "spectrograms"
 TRANSCRIPT_DIR   = OUTPUTS_DIR / "transcripts"
 METADATA_FILE    = OUTPUTS_DIR / "metadata.csv"
 
-# =========================
-# Device
-# =========================
+#==================== DEVICE =================================
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# =========================
-# CLIP backbone
-# =========================
-# Switch to ViT-B/16. The LAION2B tag below is widely used and stable.
+#===================== CLIP MODEL ==============================
+
 CLIP_MODEL_NAME = "ViT-B-16"
 CLIP_PRETRAINED = "laion2b_s34b_b88k"
 
-# =========================
-# Audio / Spectrogram (speech-centric)
-# =========================
+#========================== AUDIO / SPECTROGRAMS ======================================
+
 SR           = 16000
-N_MELS       = 80      # speech-friendly
-N_FFT        = 400     # ~25 ms @16k
-HOP_LENGTH   = 160     # ~10 ms @16k
+N_MELS       = 80
+N_FFT        = 400
+HOP_LENGTH   = 160
 TRIM_TOP_DB  = 25
 IMG_SIZE     = (224, 224)  # open_clip transform will handle final resize/crop
 
-# =========================
-# Training
-# =========================
+
+#======================== TRAINING PARAMS ======================================
+
 BATCH_SIZE        = 16
 N_SPLITS          = 5
 RANDOM_STATE      = 42
@@ -62,7 +55,7 @@ LR_MULTIMODAL     = 5e-4
 
 # Fine-tuning policy
 FREEZE_CLIP          = True     # start frozen for stability
-FREEZE_EPOCHS        = 8        # longer warmup worked best for you
+FREEZE_EPOCHS        = 10        # longer warmup worked best
 CLIP_LR_MULT         = 0.05     # CLIP gets 20x smaller LR than the heads
 PARTIAL_UNFREEZE_K   = 2        # unfreeze last K visual blocks after warmup
 
