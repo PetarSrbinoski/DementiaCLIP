@@ -208,15 +208,23 @@ def set_finetune(clip_model, finetune: bool):
         p.requires_grad = finetune
 
 
-def set_partial_finetune_last_block(clip_model):
-    """Unfreeze last visual block + LayerNorms (gentle fine-tune)."""
+def set_partial_finetune_last_block(clip_model, k: int = 1):
+    """
+    Unfreeze the last k visual transformer blocks + LayerNorms.
+    Controlled by config.PARTIAL_UNFREEZE_K.
+    """
     for p in clip_model.parameters():
         p.requires_grad = False
+
     try:
-        for p in clip_model.visual.transformer.resblocks[-1].parameters():
-            p.requires_grad = True
+        # Unfreeze last K residual blocks (gentle fine-tune)
+        for block in clip_model.visual.transformer.resblocks[-k:]:
+            for p in block.parameters():
+                p.requires_grad = True
     except Exception:
         pass
+
+    # Always unfreeze normalization layers (to allow stable adaptation)
     for m in clip_model.modules():
         if isinstance(m, torch.nn.LayerNorm):
             for p in m.parameters():
@@ -321,8 +329,11 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
     for epoch in range(cfg.epochs):
         # Unfreeze schedule (partial finetune after freeze period)
         if cfg.freeze_epochs > 0 and epoch == cfg.freeze_epochs:
-            set_partial_finetune_last_block(model.clip_model)
-            print(f"Epoch {epoch + 1}: Partially unfroze CLIP (last block + LayerNorms).")
+            set_partial_finetune_last_block(model.clip_model, k=config.PARTIAL_UNFREEZE_K)
+            print(
+                f"\nEpoch {epoch + 1}: Fine-tuning CLIP ENABLED — unfroze last {config.PARTIAL_UNFREEZE_K} block(s) + LayerNorms.")
+            trainable_params = _count_trainable(model)
+            print(f"Fine-tuning CLIP: YES — Trainable params now: {trainable_params:,}\n")
 
         # Train
         model.train()
