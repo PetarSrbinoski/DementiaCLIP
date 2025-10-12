@@ -17,12 +17,10 @@ import config
 
 warnings.filterwarnings("ignore")
 
-# ============================================================
-# Helpers: Files & constants
-# ============================================================
+# ==================================Helpers: Files & constants ============================================================
 PAR_TAG = "*PAR:"
 INV_TAG = "*INV:"
-TIMESTAMP_RE = re.compile(r"\x15(\d+)_(\d+)\x15")   # matches start_end
+TIMESTAMP_RE = re.compile(r"\x15(\d+)_(\d+)\x15")
 BRACKETS_RE = re.compile(r"\[.*?\]")
 AMP_CODE_RE = re.compile(r"&[-=+][\w:()]+")        # &=clears:throat, &-uh, &+ha
 OPTIONAL_LETTER_RE = re.compile(r"(\w)\((\w)\)")
@@ -101,9 +99,7 @@ def captionize_for_clip(clean_text: str, max_words: int = 80) -> str:
     return " ".join(tokens[:max_words])
 
 
-# ============================================================
-# Timestamp / pause metrics
-# ============================================================
+# ============================= Timestamp / pause metrics=============================
 def extract_utterance_timestamps(raw: str) -> List[Tuple[int, int]]:
     """
     Return list of (start_ms, end_ms) for *PAR: utterances, using end-of-line timestamps like s_e.
@@ -144,9 +140,7 @@ def pause_stats_from_utterances(utt_times: List[Tuple[int, int]], min_pause_ms: 
     return len(gaps), total_sec, avg_sec
 
 
-# ============================================================
-# Text features
-# ============================================================
+# ===================== Text features= ===============
 def basic_text_features(clean_text: str, raw_text_for_repairs: str, utt_count: int, utt_times: List[Tuple[int, int]]) -> Dict[str, float]:
     tokens = WORD_RE.findall(clean_text.lower())
 
