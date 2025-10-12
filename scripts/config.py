@@ -36,7 +36,7 @@ N_MELS       = 80
 N_FFT        = 400
 HOP_LENGTH   = 160
 TRIM_TOP_DB  = 25
-IMG_SIZE     = (224, 224)  # open_clip transform will handle final resize/crop
+IMG_SIZE     = (224, 224)
 
 
 #======================== TRAINING PARAMS ======================================
@@ -44,7 +44,6 @@ IMG_SIZE     = (224, 224)  # open_clip transform will handle final resize/crop
 BATCH_SIZE        = 16 #16/32
 N_SPLITS          = 5
 RANDOM_STATE      = 42
-
 # Epochs
 EPOCHS_VISION     = 16
 EPOCHS_MULTIMODAL = 20
@@ -55,8 +54,8 @@ LR_MULTIMODAL     = 3e-4
 
 # Fine-tuning policy
 FREEZE_CLIP          = True     # start frozen for stability
-FREEZE_EPOCHS        = 10       # longer warmup worked best
-CLIP_LR_MULT         = 0.05 #0.05    # CLIP gets 20x smaller LR than the heads
+FREEZE_EPOCHS        = 10       # 8 warmup worked best
+CLIP_LR_MULT         = 0.05     #0.05    # CLIP gets smaller LR than the heads
 PARTIAL_UNFREEZE_K   = 2        # unfreeze last K visual blocks after warmup
 
 # Regularization / optimization
