@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 import config
-import torch  # <-- needed for torch.save
+import torch
 
 
 class ExperimentTracker:
