@@ -55,7 +55,7 @@ LR_MULTIMODAL     = 3e-4
 
 # Fine-tuning policy
 FREEZE_CLIP          = True     # start frozen for stability
-FREEZE_EPOCHS        = 8       # longer warmup worked best
+FREEZE_EPOCHS        = 10       # longer warmup worked best
 CLIP_LR_MULT         = 0.05 #0.05    # CLIP gets 20x smaller LR than the heads
 PARTIAL_UNFREEZE_K   = 2        # unfreeze last K visual blocks after warmup
 
