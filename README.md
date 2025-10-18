@@ -1,206 +1,190 @@
-# 🧠 DementiaCLIP  
-### Fine-tuning OpenCLIP for Multimodal Dementia Classification from Speech  
+# 🧠 DementiaCLIP
+### Fine-tuning OpenCLIP for Multimodal Dementia Classification from Speech
 
-Python 3.10 + | PyTorch | OpenCLIP | MIT License  
+Python 3.10+ | PyTorch | OpenCLIP | MIT License
 
 ---
 
-## 📘 Overview  
+## 📘 Overview
 
 **DementiaCLIP** is a research framework exploring how **multimodal deep learning** can assist early dementia detection from spontaneous speech.  
-It fine-tunes **OpenCLIP (ViT-B/16 pretrained on LAION2B)** to combine **audio**, **text**, and **visual** (spectrogram) signals from the classic *Cookie Theft* picture-description task.  
+It fine-tunes **OpenCLIP (ViT-B-16 pretrained on LAION2B)** to combine **audio**, **text**, and **visual** (spectrogram) signals from the classic *Cookie Theft* picture-description task.
 
 Each modality captures complementary aspects of cognitive decline:  
-- 🎧 **Audio** – Acoustic features extracted from patient speech.  
-- 💬 **Text** – Transcribed language patterns converted to text embeddings.  
-- 👁️ **Vision** – Spectrograms processed through CLIP’s visual encoder.  
+- 🎧 **Audio** – Acoustic correlates from speech rendered as Mel-spectrogram images.  
+- 💬 **Text** – Transcribed language patterns tokenized for CLIP text encoder.  
+- 👁️ **Vision** – Spectrograms through CLIP’s visual encoder.
 
-These are fused into a shared representation for binary classification (dementia vs control).  
-
----
-
-## ⚙️ Key Features  
-
- - **Multimodal Fusion** – Audio + Text + Spectrogram features.  
- - **OpenCLIP Backbone** – `ViT-B/16` trained on `laion2b_s34b_b88k`.  
- - **Gradual Unfreezing** – CLIP frozen for 8 epochs, then partially unfrozen.  
- - **Weighted Sampling & Label Smoothing** – Stabilizes small clinical datasets.  
- - **Mixed-Precision (AMP)** – 30–40 % faster GPU training.  
- - **Early Stopping + Weight Decay** – Prevents overfitting.  
- - **5-Fold Stratified CV** – Robust performance estimation.  
- - **Automatic Experiment Tracking** – Logs metrics, configs, checkpoints, plots.  
+These are fused into a shared representation for binary classification (dementia vs control).
 
 ---
 
-## Getting Started
+## ⚙️ Key Features
+
+- **Multimodal Fusion** – Spectrogram (**vision**) + transcript (**text**) + optional **clinical** features.  
+- **OpenCLIP Backbone** – `ViT-B-16` with `laion2b_s34b_b88k` weights.  
+- **Staged Fine-Tuning** – CLIP fully frozen for warmup, then **partial unfreeze of last visual block**.  
+- **Focal Loss (γ=1) + Class Weights** – Better focus on hard/minority cases.  
+- **Weighted Sampling & Label Smoothing (configurable)** – Robust on small clinical datasets.  
+- **Warmup-Cosine LR Scheduler** – Linear warmup then cosine decay; preserves LR ratios.  
+- **Grad Clipping (‖g‖≤1.0) & AMP** – Stable and fast training on GPU.  
+- **Early Stopping (AUC-based)** – Stops when ROC-AUC plateaus.  
+- **5-Fold Stratified CV** – Reliable performance estimation.  
+- **Automatic Experiment Tracking** – Metrics, configs, checkpoints, and plots.
+
+---
+
+## 🏁 Latest Results (5-Fold CV, RTX 4050)
+
+**Run:** `2025-10-17_234935` with `ViT-B-16 | laion2b_s34b_b88k`, **partial unfreeze after 10 epochs**, warmup-cosine schedule, focal loss (γ=1), grad clip 1.0.
+
+| Model   | Accuracy |   F1   | ROC-AUC |
+|:--------------------|:-------:|:------:|:------:|
+| Vision Only | 0.3891  | 0.3346 | 0.5206 |
+| Multimodal Basic| 0.7542  | 0.7576 | 0.8313 |
+| **Multimodal Full** | **0.8155** | **0.8177** | **0.8767** |
+
+> **Note:** On this dataset, a realistic ceiling is **~0.82–0.85** accuracy (F1 similar) and **~0.88–0.91** ROC-AUC.
+
+---
+
+## 🚀 Getting Started
 
 ### Requirements
-
--   Python 3.10+
--   A CUDA-enabled GPU is highly recommended for training.
+- Python **3.10+**
+- CUDA-enabled GPU recommended
 
 ### Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone [https://github.com/your-username/DementiaCLIP.git](https://github.com/your-username/DementiaCLIP.git)
-    cd DementiaCLIP
-    ```
-
-2.  **Install the required dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+git clone https://github.com/your-username/DementiaCLIP.git
+cd DementiaCLIP
+pip install -r requirements.txt
+```
 
 ---
 
-## ⚙️ Configuration  
+## ⚙️ Configuration
 
-All parameters are defined in **`config.py`**.
+All parameters live in **`config.py`**.
 
 | Parameter | Default | Description |
-|------------|----------|-------------|
-| `CLIP_MODEL_NAME` | `'ViT-B/16'` | OpenCLIP architecture |
-| `CLIP_PRETRAINED` | `'laion2b_s34b_b88k'` | Pretrained weights |
-| `FREEZE_EPOCHS` | `8` | Epochs to keep CLIP frozen |
-| `LR_VISION` | `5e-4` | Vision encoder LR |
-| `LR_MULTIMODAL` | `5e-4` | Multimodal classifier LR |
-| `CLIP_LR_MULT` | `0.05` | CLIP fine-tuning multiplier |
-| `WEIGHT_DECAY` | `0.03` | Regularization |
-| `BATCH_SIZE` | `32` | Samples per batch |
-| `NUM_FOLDS` | `5` | CV folds |
-| `DEVICE` | `cuda` | Auto GPU detection |
+|---|---:|---|
+| `CLIP_MODEL_NAME` | `"ViT-B-16"` | OpenCLIP architecture |
+| `CLIP_PRETRAINED` | `"laion2b_s34b_b88k"` | Pretrained weights |
+| `DEVICE` | auto (`cuda` if available) | Device selection |
+| `BATCH_SIZE` | `16` | Samples per batch |
+| `N_SPLITS` | `5` | Stratified CV folds |
+| `RANDOM_STATE` | `42` | Reproducibility |
+| `EPOCHS_VISION` | `20` | Vision-only epochs |
+| `EPOCHS_MULTIMODAL` | `30` | Multimodal epochs |
+| `LR_VISION` | `2e-4` | Vision mode base LR |
+| `LR_MULTIMODAL` | `2e-4` | Multimodal base LR |
+| `FREEZE_CLIP` | `True` | Start with CLIP frozen |
+| `FREEZE_EPOCHS` | `10` | Warmup epochs (frozen) |
+| `CLIP_LR_MULT` | `0.02` | Multiplier for CLIP params |
+| `PARTIAL_UNFREEZE_K` | `1` | Unfreeze last K visual blocks |
+| `USE_CLASS_WEIGHTS` | `True` | CE/Focal α by class freq |
+| `LABEL_SMOOTHING` | `0.01` | Used only if CE is active |
+| `EARLY_STOP_PATIENCE` | `8` | AUC-based early stop patience |
+| `WEIGHT_DECAY` | `0.03` | AdamW weight decay |
+| `USE_EXTRA_CLINICAL` | `True` | Adds extra clinical feats |
+| `USE_SCHEDULER` | `True` | Enable LR scheduling |
+| `SCHEDULER_TYPE` | `"warmup_cosine"` | LR scheduler |
+| `WARMUP_EPOCHS` | `4` | Linear warmup length |
+| `MIN_LR_FACTOR` | `0.05` | Cosine floor (× base LR) |
+| `GRAD_CLIP_NORM` | `1.0` | Global grad-norm cap |
+
+> **Loss:** The training script enables **Focal Loss (γ=1)** by default (`USE_FOCAL_LOSS=True`). When Focal Loss is active, `LABEL_SMOOTHING` is ignored. Class weights (α) are still used.
 
 ---
 
-## 🧹 Preprocessing  
+## 🧹 Data & Preprocessing
 
+Configured in `config.py`:
+
+- **Audio/Text** under `Data/`  
+- **Outputs**: models, logs, spectrograms, transcripts, and metadata CSV under `Outputs/`
+
+Run preprocessing:
 ```bash
 python preprocess_data.py
-````
-## 🧠 Training
+```
 
-### 🔹 Train a Single Model
+Spectrograms are resized to **224×224**, audio is standardized (e.g., 16 kHz, 80 Mel bins), transcripts are trimmed to **≤256 words** to avoid CLIP tokenizer truncation.
 
-    python train_classifier.py --mode multimodal_full
-
-Available modes:
-- vision_only
-- multimodal_basic
-- multimodal_full (⭐ best performing)
-
-All model checkpoints, logs, metrics, and visualizations are saved under:
-`Outputs/experiments/`
+**Clinical features** (used when `USE_EXTRA_CLINICAL=True`):  
+Base: `pause_count`, `total_pause_duration`, `speech_rate_wps`, `type_token_ratio`  
+Extra: `avg_pause_duration`, `mlu_words`
 
 ---
 
-### 🔹 Run All Models
+## 🧠 Training
 
-To benchmark all configurations sequentially:
+### Train one mode
+```bash
+python scripts/train_classifier.py --mode multimodal_full
+# or: --mode vision_only | multimodal_basic
+```
 
-    python run_all_models.py
+Artifacts (checkpoints, logs, metrics, plots) are saved in:
+```
+Outputs/experiments/
+```
 
-This script executes 5-fold cross-validation for each mode and logs:
-- Accuracy
-- F1-Score
-- ROC-AUC
-- Confusion matrices
-- Training/validation curves
+### Run all modes (benchmark)
+```bash
+python run_all_models.py
+```
 
 ---
 
 ## 📈 Experiment Tracking
 
-`experiment_tracker.py` automatically handles experiment logging and output management:
-- Records metrics for each epoch and fold
-- Saves best model checkpoints
-- Generates plots (loss, ROC, confusion matrices)
-
-This ensures complete reproducibility and transparent reporting of results.
+`experiment_tracker.py` logs for every fold/epoch:
+- Train/val loss, **Accuracy**, **F1**, **ROC-AUC**
+- LR schedule steps
+- Best checkpoints and diagnostic plots (loss curves, ROC, CM)
 
 ---
 
-## 🏆 Best Results so Far (5-Fold CV on RTX 4050 GPU)
+## 🧩 Modules
 
-| Model              | Accuracy | F1    | ROC-AUC |
-|:-------------------|:--------:|:-----:|:-------:|
-| Vision Only        | 0.420    | 0.388 | 0.517   |
-| Multimodal Basic   | 0.741    | 0.745 | 0.819   |
-| **Multimodal Full**| **0.816**| **0.819** | **0.909** |
-
-**Note:** Best model uses partial unfreeze after 8 epochs.  
-Realistic accuracy ceiling for this dataset: 0.82–0.85 (F1 ≈ same, ROC-AUC ≈ 0.88–0.91).
+- **`config.py`** – Centralized paths & hyperparameters.  
+- **`preprocess_data.py`** – Builds spectrograms, cleans transcripts, compiles metadata.  
+- **`scripts/train_classifier.py`** – Training loop with staged unfreeze, focal loss, scheduler, AMP, grad-clip, early stop.  
+- **`run_all_models.py`** – Orchestrates 5-fold CV for all modes and aggregates results.  
+- **`experiment_tracker.py`** – Filesystem-based experiment logging & plotting.
 
 ---
 
-## 🧩 Modules Explained
-
-### config.py
-Central configuration file defining all paths, hyperparameters, and training constants.
-Used across every script for reproducibility and consistent experiment setup.
-
-### preprocess_data.py
-Handles data preparation:
-- Loads raw audio and text from `Data/`
-- Extracts MFCCs and Mel-spectrograms
-- Cleans and tokenizes transcripts
-- Builds stratified train/val/test splits per fold.
-Why: Ensures a unified, reproducible preprocessing pipeline across all runs.
-
-### train_classifier.py
-Core training script:
-- Initializes OpenCLIP (ViT-B/16) backbone
-- Applies FREEZE_CLIP then partial unfreeze after 8 epochs
-- Uses weighted sampling, label smoothing, AMP, and early stopping
-- Logs per-epoch metrics and saves best checkpoints.
-Why: Provides flexible multimodal training for comparative experiments.
-
-### run_all_models.py
-Pipeline orchestrator:
-- Iterates through all model modes
-- Invokes `train_classifier.py` automatically
-- Collects metrics and aggregates results into summary files
-Why: Enables easy end-to-end benchmarking without manual intervention.
-
-### experiment_tracker.py
-Experiment management and logging utility:
-- Records performance metrics, losses, and config hashes
-- Saves checkpoints, CSVs, and plots
-- Supports post-analysis and reproducibility
-Why: Provides structured tracking for every run and fold.
-
----
-
-## 🧠 Preventing Overfitting & Handling Class Imbalance
-
-The dataset is relatively small and unbalanced (fewer dementia than control samples).  
-To ensure generalization and stability, several complementary strategies are used:
+## 🔬 Why This Setup Works
 
 ### Overfitting Prevention
-- **Early Stopping:** Stops training once validation loss stops improving, preventing the model from memorizing training data.
-- **Weight Decay (0.03):** Adds L2 regularization to reduce overfitting by penalizing large weights.
-- **Gradual Unfreeze:** Keeps CLIP frozen for 8 epochs, allowing the classifier to learn before fine-tuning the encoder—this stabilizes gradients and avoids catastrophic forgetting.
-- **Label Smoothing (0.1):** Reduces overconfidence in predictions and encourages better generalization.
-- **Cross-Validation (5-Fold):** Ensures robustness by averaging performance across multiple splits.
+- **Warmup then partial unfreeze (K=1):** Stabilizes heads first, then gently adapts CLIP.  
+- **AdamW + weight decay (0.03):** Regularizes large weights.  
+- **Grad clipping (1.0):** Prevents rare exploding steps after unfreeze.  
+- **AUC-based early stopping:** Optimizes for ranking quality, not just accuracy.
 
-### Class Imbalance Handling
-- **WeightedRandomSampler:** Balances class frequencies by sampling underrepresented classes more often.
-- **Focal Loss:** Focuses training on hard-to-classify samples by down-weighting easy examples, helping the model learn from minority-class errors more effectively.
-  - **Why Focal Loss:** Standard cross-entropy loss treats all examples equally, which can bias the model toward the majority class. Focal Loss dynamically scales the loss to emphasize difficult, misclassified samples—crucial when detecting dementia cases that are rarer in the dataset.
+### Imbalance Handling
+- **WeightedRandomSampler** balances batches.  
+- **Focal Loss (γ=1) + α (class weights):** Emphasizes hard/minority samples; more stable than plain CE on small n.
 
-Together, these techniques create a model that remains stable during training, generalizes well on unseen data, and maintains sensitivity to minority-class (dementia) predictions.
+### Optimization Details
+- **Warmup-Cosine:** Linear warmup (4 epochs) → cosine decay to **5%** of base LR; maintains CLIP/head LR ratio (`CLIP_LR_MULT=0.02`).  
+- **AMP:** Faster training and lower VRAM usage on RTX 4050.
 
 ---
 
 ## 💡 Training Notes
 
-- Automatic Mixed Precision (AMP) speeds up training by ≈ 30%
-- WeightedRandomSampler balances dementia vs control data
-- Early Stopping on validation loss prevents overfitting
-- Label Smoothing = 0.1 stabilizes gradients
-- Gradual Unfreeze after epoch 8 yields best F1 ≈ 0.82
+- Texts are truncated to **≤256 words** to minimize CLIP tokenizer truncation artifacts.  
+- Clinical features are **standardized per fold** using `StandardScaler` fit on the training split only.  
+- After warmup, the **CLIP LR is halved at unfreeze** and only the **last visual block + LayerNorms** are trainable.  
+- Typical early stopping for multimodal occurs around **epochs 14–20**.
 
 ---
+
+   
 
 ## 🧑‍💻 Author
 
