@@ -5,6 +5,7 @@ import os
 import random
 from dataclasses import dataclass
 from typing import Dict, List
+import math
 import numpy as np
 import pandas as pd
 import torch
@@ -22,7 +23,7 @@ from experiment_tracker import ExperimentTracker
 
 # Optional focal loss default: False (usefull for imbalanced dataset like mine)
 USE_FOCAL_LOSS = True
-FOCAL_GAMMA = 2.0
+FOCAL_GAMMA = 1
 
 
 class FocalLoss(nn.Module):
@@ -81,7 +82,6 @@ _EXTRA_CLINICAL = ["avg_pause_duration", "mlu_words"]  # both exist in your meta
 CLINICAL_COLS = _BASE_CLINICAL + _EXTRA_CLINICAL if getattr(config, "USE_EXTRA_CLINICAL", True) else _BASE_CLINICAL
 
 
-
 def _shrink_text(txt: str, max_words: int = 256) -> str:
     """Shorten transcript to avoid CLIP tokenizer truncation."""
     if not txt:
@@ -133,7 +133,7 @@ class VisionHead(nn.Module):
             nn.LayerNorm(in_dim),
             nn.Linear(in_dim, 256),
             nn.ReLU(),
-            nn.Dropout(0.4),
+            nn.Dropout(0.5),  # was 0.4
             nn.Linear(256, 2),
         )
 
@@ -187,10 +187,10 @@ class MultimodalClassifierFull(nn.Module):
         self.head = nn.Sequential(
             nn.Linear(embed_dim * 2 + 64, 512),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.35),  # was 0.3
             nn.Linear(512, 128),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.25),  # was 0.2
             nn.Linear(128, 2),
         )
 
@@ -236,6 +236,33 @@ def _count_trainable(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+# ============================ SCHEDULER ================================
+def make_warmup_cosine_scheduler(optimizer: optim.Optimizer,
+                                 total_epochs: int,
+                                 warmup_epochs: int = 4,
+                                 min_lr_factor: float = 0.1):
+    """
+    Epoch-based schedule that scales each param group's LR by a factor in [min_lr_factor, 1.0].
+    - Linear warmup for `warmup_epochs`
+    - Cosine decay to `min_lr_factor` for the remaining epochs
+    Keeps param-group proportions (so CLIP_LR_MULT stays intact).
+    """
+    assert 0.0 < min_lr_factor <= 1.0
+    warmup_epochs = int(warmup_epochs)
+    total_epochs = int(total_epochs)
+    remain = max(1, total_epochs - warmup_epochs)
+
+    def lr_lambda(epoch: int) -> float:
+        # epoch is 0-based
+        if epoch < warmup_epochs:
+            return (epoch + 1) / float(warmup_epochs)
+        t = (epoch - warmup_epochs) / float(remain)
+        cosine = 0.5 * (1.0 + math.cos(math.pi * t))
+        return min_lr_factor + (1.0 - min_lr_factor) * cosine
+
+    return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+
+
 # ================================== TRAIN LOOP ==============================
 
 @dataclass
@@ -249,6 +276,12 @@ class FoldConfig:
     use_amp: bool
     label_smoothing: float
     num_workers: int
+    # <<< added
+    use_scheduler: bool
+    scheduler_type: str
+    warmup_epochs: int
+    min_lr_factor: float
+    grad_clip_norm: float | None
 
 
 def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
@@ -271,9 +304,17 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
     weights = train_df["label"].map({0: 1.0 / class_counts[0], 1: 1.0 / class_counts[1]}).values
     sampler = WeightedRandomSampler(weights=weights, num_samples=len(weights), replacement=True)
 
-    train_loader = DataLoader(train_ds, batch_size=config.BATCH_SIZE, sampler=sampler, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=0)
+    train_loader = DataLoader(
+        train_ds, batch_size=config.BATCH_SIZE, sampler=sampler,
+        num_workers=cfg.num_workers, pin_memory=True,
+        persistent_workers=(cfg.num_workers > 0)
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=config.BATCH_SIZE, shuffle=False,
+        num_workers=cfg.num_workers, pin_memory=True,
+        persistent_workers=(cfg.num_workers > 0)
 
+    )
     # Build model
     if cfg.mode == "vision_only":
         model = VisionClassifier(clip_model)
@@ -304,7 +345,7 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
             dtype=torch.float32,
             device=config.DEVICE,
         )
-        alpha_tensor = per_class  # reuse for focal if enabled
+        alpha_tensor = per_class
 
     if USE_FOCAL_LOSS:
         # Focal loss ignores label_smoothing
@@ -320,22 +361,44 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
         ],
         weight_decay=0.03,
     )
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
+
+    if cfg.use_scheduler:
+        total_epochs = cfg.epochs
+        if cfg.scheduler_type == "warmup_cosine":
+            scheduler = make_warmup_cosine_scheduler(
+                optimizer,
+                total_epochs=total_epochs,
+                warmup_epochs=cfg.warmup_epochs,
+                min_lr_factor=cfg.min_lr_factor,
+            )
+            print(f"[Scheduler] warmup_cosine | warmup={cfg.warmup_epochs} | min_lr_factor={cfg.min_lr_factor}")
+        elif cfg.scheduler_type == "cosine":
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
+            print(f"[Scheduler] cosine | T_max={total_epochs}")
+        else:
+            scheduler = None
+            print("[Scheduler] disabled (unknown type)")
+    else:
+        scheduler = None
+        print("[Scheduler] disabled")
+
     scaler_amp = amp.GradScaler(device="cuda", enabled=cfg.use_amp)
 
     best_val = float("inf")
     patience = getattr(config, "EARLY_STOP_PATIENCE", 6)
     stale = 0
+    best_auc = -1.0
 
     for epoch in range(cfg.epochs):
         # Unfreeze schedule (partial finetune after freeze period)
         if cfg.freeze_epochs > 0 and epoch == cfg.freeze_epochs:
             set_partial_finetune_last_block(model.clip_model, k=config.PARTIAL_UNFREEZE_K)
+            # halve CLIP LR; keep head LR unchanged
+            optimizer.param_groups[0]["lr"] *= 0.5  # group 0 = CLIP
             print(
-                f"\nEpoch {epoch + 1}: Fine-tuning CLIP ENABLED — unfroze last {config.PARTIAL_UNFREEZE_K} block(s) + LayerNorms.")
-            trainable_params = _count_trainable(model)
-            print(f"Fine-tuning CLIP: YES — Trainable params now: {trainable_params:,}\n")
-
+                f"\nEpoch {epoch + 1}: Fine-tuning CLIP ENABLED — unfroze last {config.PARTIAL_UNFREEZE_K} block(s) + LayerNorms."
+                f"\n[LR] After unfreeze: CLIP LR -> {optimizer.param_groups[0]['lr']:.2e}\n"
+            )
         # Train
         model.train()
         train_loss = 0.0
@@ -358,7 +421,11 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
                 loss = criterion(logits, labels)
 
             scaler_amp.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+            if cfg.grad_clip_norm is not None:
+                scaler_amp.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.grad_clip_norm)
+
             scaler_amp.step(optimizer)
             scaler_amp.update()
             train_loss += loss.item()
@@ -408,14 +475,20 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
             f"val_loss={avg_val:.4f} acc={acc:.4f} f1={f1:.4f} roc_auc={roc:.4f}"
         )
 
-        if avg_val < best_val:
-            best_val, stale = avg_val, 0
+        if scheduler is not None:
+            scheduler.step()
+
+        # ----- Early stopping (AUC-based, with min_delta tolerance) -----
+        min_delta = 1e-4  # minimum meaningful improvement
+        if roc > best_auc + min_delta:
+            best_auc = roc
+            stale = 0
+            best_val = avg_val
         else:
             stale += 1
             if stale >= patience:
-                print(f"Early stopping at epoch {epoch + 1}")
+                print(f"Early stopping at epoch {epoch + 1} (no AUC improvement)")
                 break
-        scheduler.step()
 
     return {"acc": acc, "f1": f1, "roc_auc": roc}
 
@@ -444,6 +517,11 @@ def main():
         use_amp=(config.DEVICE == "cuda"),
         label_smoothing=0.0 if USE_FOCAL_LOSS else getattr(config, "LABEL_SMOOTHING", 0.0),
         num_workers=min(8, os.cpu_count() or 0),
+        use_scheduler=getattr(config, "USE_SCHEDULER", True),
+        scheduler_type=getattr(config, "SCHEDULER_TYPE", "warmup_cosine"),
+        warmup_epochs=getattr(config, "WARMUP_EPOCHS", 4),
+        min_lr_factor=getattr(config, "MIN_LR_FACTOR", 0.10),
+        grad_clip_norm=getattr(config, "GRAD_CLIP_NORM", 1.0),
     )
 
     skf = StratifiedKFold(n_splits=config.N_SPLITS, shuffle=True, random_state=config.RANDOM_STATE)

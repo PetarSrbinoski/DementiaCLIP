@@ -45,23 +45,31 @@ BATCH_SIZE        = 16 #16/32
 N_SPLITS          = 5
 RANDOM_STATE      = 42
 # Epochs
-EPOCHS_VISION     = 16
-EPOCHS_MULTIMODAL = 20
+EPOCHS_VISION     = 20
+EPOCHS_MULTIMODAL = 30
 
 # Learning rates (conservative for small data)
-LR_VISION         = 3e-4
-LR_MULTIMODAL     = 3e-4
+LR_VISION         = 2e-4
+LR_MULTIMODAL     = 2e-4
 
 # Fine-tuning policy
 FREEZE_CLIP          = True     # start frozen for stability
-FREEZE_EPOCHS        = 10       # 8 warmup worked best
-CLIP_LR_MULT         = 0.05     #0.05    # CLIP gets smaller LR than the heads
-PARTIAL_UNFREEZE_K   = 2        # unfreeze last K visual blocks after warmup
+FREEZE_EPOCHS        = 10      # 8 warmup worked best
+CLIP_LR_MULT         = 0.02     #0.05    # CLIP gets smaller LR than the heads
+PARTIAL_UNFREEZE_K   = 1        # unfreeze last K visual blocks after warmup
 
 # Regularization / optimization
 USE_CLASS_WEIGHTS   = True
-LABEL_SMOOTHING     = 0.05
+LABEL_SMOOTHING     = 0.01
 EARLY_STOP_PATIENCE = 8 #6
 WEIGHT_DECAY        = 0.03
 
 USE_EXTRA_CLINICAL = True #false
+
+
+# ======================== LR SCHEDULER =========================
+USE_SCHEDULER       = True        # turn on/off globally
+SCHEDULER_TYPE      = "warmup_cosine"
+WARMUP_EPOCHS       = 4           # linear warmup
+MIN_LR_FACTOR       = 0.05        # final LR = base_lr * MIN_LR_FACTOR (10%)
+GRAD_CLIP_NORM      = 1.0         # set to None to disable gradient clipping

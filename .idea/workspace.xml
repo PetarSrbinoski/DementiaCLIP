@@ -4,7 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="df9bb3b3-8517-400f-ba97-3d663e8441f3" name="Changes" comment="" />
+    <list default="true" id="df9bb3b3-8517-400f-ba97-3d663e8441f3" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Outputs/experiments/run_all_20251010_171836.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/train_classifier.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/train_classifier.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -52,6 +57,7 @@
 }</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\petar\PycharmProjects\DementiaCLIP" />
       <recent name="C:\Users\petar\PycharmProjects\DementiaCLIP\Data" />
     </key>
   </component>
@@ -87,6 +93,7 @@
       <workItem from="1760106450465" duration="17032000" />
       <workItem from="1760167300094" duration="17608000" />
       <workItem from="1760267265475" duration="1772000" />
+      <workItem from="1760719747352" duration="8112000" />
     </task>
     <servers />
   </component>
