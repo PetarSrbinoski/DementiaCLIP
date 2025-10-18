@@ -1,7 +1,7 @@
 # 🧠 DementiaCLIP
 ### Fine-tuning OpenCLIP for Multimodal Dementia Classification from Speech
 
-Python 3.10+ | PyTorch | OpenCLIP | MIT License
+Python 3.10+ | PyTorch | OpenCLIP 
 
 ---
 
