@@ -77,7 +77,7 @@ def print_hardware_header() -> str:
 # ======================DATASET======================================
 # Build the clinical feature set dynamically from config
 _BASE_CLINICAL = ["pause_count", "total_pause_duration", "speech_rate_wps", "type_token_ratio"]
-_EXTRA_CLINICAL = ["avg_pause_duration", "mlu_words"]  # both exist in your metadata
+_EXTRA_CLINICAL = ["avg_pause_duration", "mlu_words"]
 
 CLINICAL_COLS = _BASE_CLINICAL + _EXTRA_CLINICAL if getattr(config, "USE_EXTRA_CLINICAL", True) else _BASE_CLINICAL
 
@@ -225,7 +225,7 @@ def set_partial_finetune_last_block(clip_model, k: int = 1):
     except Exception:
         pass
 
-    # Always unfreeze normalization layers (to allow stable adaptation)
+    # Always unfreeze normalization layers
     for m in clip_model.modules():
         if isinstance(m, torch.nn.LayerNorm):
             for p in m.parameters():
