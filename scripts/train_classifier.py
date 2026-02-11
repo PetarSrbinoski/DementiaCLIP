@@ -26,6 +26,8 @@ USE_FOCAL_LOSS = True
 FOCAL_GAMMA = 1
 
 
+#TODO: add fns for single file evaluation
+
 class FocalLoss(nn.Module):
     """
     Focal Loss for multi-class classification.
