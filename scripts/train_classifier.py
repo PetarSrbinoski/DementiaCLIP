@@ -4,7 +4,6 @@ import argparse
 import os
 import random
 from dataclasses import dataclass
-from typing import Dict, List
 import math
 import numpy as np
 import pandas as pd
@@ -26,7 +25,8 @@ USE_FOCAL_LOSS = True
 FOCAL_GAMMA = 1
 
 
-#TODO: add fns for single file evaluation
+# TODO: add fns for single file evaluation
+
 
 class FocalLoss(nn.Module):
     """
@@ -34,7 +34,12 @@ class FocalLoss(nn.Module):
     Based on: CE * (1 - p_t)^gamma with optional per-class alpha (weight).
     """
 
-    def __init__(self, alpha: torch.Tensor | None = None, gamma: float = 2.0, reduction: str = "mean"):
+    def __init__(
+        self,
+        alpha: torch.Tensor | None = None,
+        gamma: float = 2.0,
+        reduction: str = "mean",
+    ):
         super().__init__()
         self.register_buffer("alpha", alpha if alpha is not None else None)
         self.gamma = gamma
@@ -42,9 +47,16 @@ class FocalLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         # CE per-sample (no reduction)
-        ce = nn.functional.cross_entropy(logits, targets, weight=self.alpha, reduction="none")
+        ce = nn.functional.cross_entropy(
+            logits, targets, weight=self.alpha, reduction="none"
+        )
         # p_t = prob of the true class
-        pt = torch.softmax(logits, dim=1).gather(1, targets.unsqueeze(1)).squeeze(1).clamp_(1e-6, 1.0 - 1e-6)
+        pt = (
+            torch.softmax(logits, dim=1)
+            .gather(1, targets.unsqueeze(1))
+            .squeeze(1)
+            .clamp_(1e-6, 1.0 - 1e-6)
+        )
         focal = (1.0 - pt).pow(self.gamma) * ce
         if self.reduction == "mean":
             return focal.mean()
@@ -69,7 +81,9 @@ def print_hardware_header() -> str:
     print("[Hardware Check]")
     print("=" * 60)
     if torch.cuda.is_available():
-        print(f"Using device: {torch.cuda.get_device_name(torch.cuda.current_device())}")
+        print(
+            f"Using device: {torch.cuda.get_device_name(torch.cuda.current_device())}"
+        )
     else:
         print("WARNING: CUDA not available — running on CPU (slow).")
     print("=" * 60)
@@ -77,11 +91,19 @@ def print_hardware_header() -> str:
 
 
 # ======================DATASET======================================
-# Build the clinical feature set dynamically from config
-_BASE_CLINICAL = ["pause_count", "total_pause_duration", "speech_rate_wps", "type_token_ratio"]
+_BASE_CLINICAL = [
+    "pause_count",
+    "total_pause_duration",
+    "speech_rate_wps",
+    "type_token_ratio",
+]
 _EXTRA_CLINICAL = ["avg_pause_duration", "mlu_words"]
 
-CLINICAL_COLS = _BASE_CLINICAL + _EXTRA_CLINICAL if getattr(config, "USE_EXTRA_CLINICAL", True) else _BASE_CLINICAL
+CLINICAL_COLS = (
+    _BASE_CLINICAL + _EXTRA_CLINICAL
+    if getattr(config, "USE_EXTRA_CLINICAL", True)
+    else _BASE_CLINICAL
+)
 
 
 def _shrink_text(txt: str, max_words: int = 256) -> str:
@@ -120,13 +142,14 @@ class DementiaDataset(Dataset):
     def __getitem__(self, idx):
         img = Image.open(self.image_paths[idx]).convert("RGB")
         img_tensor = self.preprocess(img)
-        transcript = self.transcripts[idx]  # return raw text string (tokenize per batch)
+        transcript = self.transcripts[idx]
         clinical = torch.from_numpy(self.norm_feats[idx])
         label = torch.tensor(self.labels[idx], dtype=torch.long)
         return img_tensor, transcript, clinical, label
 
 
 # ================================ MODELS ============================
+
 
 class VisionHead(nn.Module):
     def __init__(self, in_dim: int):
@@ -135,7 +158,7 @@ class VisionHead(nn.Module):
             nn.LayerNorm(in_dim),
             nn.Linear(in_dim, 256),
             nn.ReLU(),
-            nn.Dropout(0.5),  # was 0.4
+            nn.Dropout(0.5),  # 0.4
             nn.Linear(256, 2),
         )
 
@@ -184,15 +207,17 @@ class MultimodalClassifierFull(nn.Module):
         self.clip_model = clip_model
         embed_dim = clip_model.visual.output_dim
         clin_in = len(CLINICAL_COLS)
-        self.proj_clin = nn.Sequential(nn.Linear(clin_in, 64), nn.ReLU(), nn.LayerNorm(64))
+        self.proj_clin = nn.Sequential(
+            nn.Linear(clin_in, 64), nn.ReLU(), nn.LayerNorm(64)
+        )
         self.norm = nn.LayerNorm(embed_dim * 2 + 64)
         self.head = nn.Sequential(
             nn.Linear(embed_dim * 2 + 64, 512),
             nn.ReLU(),
-            nn.Dropout(0.35),  # was 0.3
+            nn.Dropout(0.35),  # 0.3
             nn.Linear(512, 128),
             nn.ReLU(),
-            nn.Dropout(0.25),  # was 0.2
+            nn.Dropout(0.25),  # 0.2
             nn.Linear(128, 2),
         )
 
@@ -205,6 +230,7 @@ class MultimodalClassifierFull(nn.Module):
 
 
 # ================================== FINE TUNING ================================
+
 
 def set_finetune(clip_model, finetune: bool):
     for p in clip_model.parameters():
@@ -239,10 +265,12 @@ def _count_trainable(model):
 
 
 # ============================ SCHEDULER ================================
-def make_warmup_cosine_scheduler(optimizer: optim.Optimizer,
-                                 total_epochs: int,
-                                 warmup_epochs: int = 4,
-                                 min_lr_factor: float = 0.1):
+def make_warmup_cosine_scheduler(
+    optimizer: optim.Optimizer,
+    total_epochs: int,
+    warmup_epochs: int = 4,
+    min_lr_factor: float = 0.1,
+):
     """
     Epoch-based schedule that scales each param group's LR by a factor in [min_lr_factor, 1.0].
     - Linear warmup for `warmup_epochs`
@@ -267,6 +295,7 @@ def make_warmup_cosine_scheduler(optimizer: optim.Optimizer,
 
 # ================================== TRAIN LOOP ==============================
 
+
 @dataclass
 class FoldConfig:
     mode: str
@@ -278,7 +307,6 @@ class FoldConfig:
     use_amp: bool
     label_smoothing: float
     num_workers: int
-    # <<< added
     use_scheduler: bool
     scheduler_type: str
     warmup_epochs: int
@@ -301,21 +329,32 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
     train_ds = DementiaDataset(train_df, preprocess, scaler)
     val_ds = DementiaDataset(val_df, preprocess, scaler)
 
-    # WEIGHTED sampler (training only)
+    # WEIGHTED sampler
     class_counts = train_df["label"].value_counts()
-    weights = train_df["label"].map({0: 1.0 / class_counts[0], 1: 1.0 / class_counts[1]}).values
-    sampler = WeightedRandomSampler(weights=weights, num_samples=len(weights), replacement=True)
+    weights = (
+        train_df["label"]
+        .map({0: 1.0 / class_counts[0], 1: 1.0 / class_counts[1]})
+        .values
+    )
+    sampler = WeightedRandomSampler(
+        weights=weights, num_samples=len(weights), replacement=True
+    )
 
     train_loader = DataLoader(
-        train_ds, batch_size=config.BATCH_SIZE, sampler=sampler,
-        num_workers=cfg.num_workers, pin_memory=True,
-        persistent_workers=(cfg.num_workers > 0)
+        train_ds,
+        batch_size=config.BATCH_SIZE,
+        sampler=sampler,
+        num_workers=cfg.num_workers,
+        pin_memory=True,
+        persistent_workers=(cfg.num_workers > 0),
     )
     val_loader = DataLoader(
-        val_ds, batch_size=config.BATCH_SIZE, shuffle=False,
-        num_workers=cfg.num_workers, pin_memory=True,
-        persistent_workers=(cfg.num_workers > 0)
-
+        val_ds,
+        batch_size=config.BATCH_SIZE,
+        shuffle=False,
+        num_workers=cfg.num_workers,
+        pin_memory=True,
+        persistent_workers=(cfg.num_workers > 0),
     )
     # Build model
     if cfg.mode == "vision_only":
@@ -338,7 +377,6 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
     print(f"Trainable params: {_count_trainable(model):,}")
 
     # === Loss function selection ===
-    # Compute class weights tensor on device if requested
     alpha_tensor = None
     if cfg.use_class_weights:
         total = class_counts.sum()
@@ -353,13 +391,22 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
         # Focal loss ignores label_smoothing
         criterion = FocalLoss(alpha=alpha_tensor, gamma=FOCAL_GAMMA, reduction="mean")
     else:
-        criterion = nn.CrossEntropyLoss(weight=alpha_tensor, label_smoothing=cfg.label_smoothing)
+        criterion = nn.CrossEntropyLoss(
+            weight=alpha_tensor, label_smoothing=cfg.label_smoothing
+        )
 
     # Optimizer & LR scheduling
     optimizer = optim.AdamW(
         [
             {"params": model.clip_model.parameters(), "lr": cfg.lr * cfg.clip_lr_mult},
-            {"params": [p for n, p in model.named_parameters() if not n.startswith("clip_model.")], "lr": cfg.lr},
+            {
+                "params": [
+                    p
+                    for n, p in model.named_parameters()
+                    if not n.startswith("clip_model.")
+                ],
+                "lr": cfg.lr,
+            },
         ],
         weight_decay=0.03,
     )
@@ -373,9 +420,13 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
                 warmup_epochs=cfg.warmup_epochs,
                 min_lr_factor=cfg.min_lr_factor,
             )
-            print(f"[Scheduler] warmup_cosine | warmup={cfg.warmup_epochs} | min_lr_factor={cfg.min_lr_factor}")
+            print(
+                f"[Scheduler] warmup_cosine | warmup={cfg.warmup_epochs} | min_lr_factor={cfg.min_lr_factor}"
+            )
         elif cfg.scheduler_type == "cosine":
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=total_epochs
+            )
             print(f"[Scheduler] cosine | T_max={total_epochs}")
         else:
             scheduler = None
@@ -386,17 +437,17 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
 
     scaler_amp = amp.GradScaler(device="cuda", enabled=cfg.use_amp)
 
-    best_val = float("inf")
     patience = getattr(config, "EARLY_STOP_PATIENCE", 6)
     stale = 0
     best_auc = -1.0
 
     for epoch in range(cfg.epochs):
-        # Unfreeze schedule (partial finetune after freeze period)
         if cfg.freeze_epochs > 0 and epoch == cfg.freeze_epochs:
-            set_partial_finetune_last_block(model.clip_model, k=config.PARTIAL_UNFREEZE_K)
+            set_partial_finetune_last_block(
+                model.clip_model, k=config.PARTIAL_UNFREEZE_K
+            )
             # halve CLIP LR; keep head LR unchanged
-            optimizer.param_groups[0]["lr"] *= 0.5  # group 0 = CLIP
+            optimizer.param_groups[0]["lr"] *= 0.5
             print(
                 f"\nEpoch {epoch + 1}: Fine-tuning CLIP ENABLED — unfroze last {config.PARTIAL_UNFREEZE_K} block(s) + LayerNorms."
                 f"\n[LR] After unfreeze: CLIP LR -> {optimizer.param_groups[0]['lr']:.2e}\n"
@@ -426,7 +477,9 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
 
             if cfg.grad_clip_norm is not None:
                 scaler_amp.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.grad_clip_norm)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm=cfg.grad_clip_norm
+                )
 
             scaler_amp.step(optimizer)
             scaler_amp.update()
@@ -481,11 +534,32 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
             scheduler.step()
 
         # ----- Early stopping (AUC-based, with min_delta tolerance) -----
-        min_delta = 1e-4  # minimum meaningful improvement
+        min_delta = 1e-4
         if roc > best_auc + min_delta:
             best_auc = roc
             stale = 0
-            best_val = avg_val
+            save_dir = os.path.join("checkpoints", cfg.mode)
+            os.makedirs(save_dir, exist_ok=True)
+
+            save_path = os.path.join(save_dir, f"fold{fold_idx + 1}_bext.pt")
+
+            torch.save(
+                {
+                    "model_state_dict": model.state_dict(),
+                    "mode": cfg.mode,
+                    "clip_model_name": config.CLIP_MODEL_NAME,
+                    "clip_pretrained": config.CLIP_PRETRAINED,
+                    "clinical_cols": CLINICAL_COLS,
+                    "scaler_mean": scaler.mean_,
+                    "scaler_scale": scaler.scale_,
+                    "epoch": epoch,
+                    "roc_auc": best_auc,
+                },
+                save_path,
+            )
+
+            print(f"Saved best model → {save_path}")
+
         else:
             stale += 1
             if stale >= patience:
@@ -498,8 +572,12 @@ def run_fold(fold_idx, train_df, val_df, cfg: FoldConfig, tracker):
 # ================================ MAIN =============================================
 def main():
     parser = argparse.ArgumentParser(description="Train Dementia CLIP classifier")
-    parser.add_argument("--mode", type=str, required=True,
-                        choices=["vision_only", "multimodal_basic", "multimodal_full"])
+    parser.add_argument(
+        "--mode",
+        type=str,
+        required=True,
+        choices=["vision_only", "multimodal_basic", "multimodal_full"],
+    )
     args = parser.parse_args()
 
     device = print_hardware_header()
@@ -507,17 +585,23 @@ def main():
     print(f"\nStarting training: {args.mode} on {device}\n")
 
     df = pd.read_csv(config.METADATA_FILE)
-    tracker = ExperimentTracker(experiment_name=f"CLIP_{config.CLIP_MODEL_NAME}_finetune", mode=args.mode)
+    tracker = ExperimentTracker(
+        experiment_name=f"CLIP_{config.CLIP_MODEL_NAME}_finetune", mode=args.mode
+    )
 
     fold_cfg = FoldConfig(
         mode=args.mode,
-        epochs=config.EPOCHS_MULTIMODAL if args.mode != "vision_only" else config.EPOCHS_VISION,
+        epochs=config.EPOCHS_MULTIMODAL
+        if args.mode != "vision_only"
+        else config.EPOCHS_VISION,
         lr=config.LR_MULTIMODAL if args.mode != "vision_only" else config.LR_VISION,
         clip_lr_mult=config.CLIP_LR_MULT,
         freeze_epochs=config.FREEZE_EPOCHS,
         use_class_weights=config.USE_CLASS_WEIGHTS,
         use_amp=(config.DEVICE == "cuda"),
-        label_smoothing=0.0 if USE_FOCAL_LOSS else getattr(config, "LABEL_SMOOTHING", 0.0),
+        label_smoothing=0.0
+        if USE_FOCAL_LOSS
+        else getattr(config, "LABEL_SMOOTHING", 0.0),
         num_workers=min(8, os.cpu_count() or 0),
         use_scheduler=getattr(config, "USE_SCHEDULER", True),
         scheduler_type=getattr(config, "SCHEDULER_TYPE", "warmup_cosine"),
@@ -526,18 +610,24 @@ def main():
         grad_clip_norm=getattr(config, "GRAD_CLIP_NORM", 1.0),
     )
 
-    skf = StratifiedKFold(n_splits=config.N_SPLITS, shuffle=True, random_state=config.RANDOM_STATE)
+    skf = StratifiedKFold(
+        n_splits=config.N_SPLITS, shuffle=True, random_state=config.RANDOM_STATE
+    )
     fold_metrics = []
 
     for i, (tr, va) in enumerate(skf.split(df, df["label"])):
         metrics = run_fold(i, df.iloc[tr], df.iloc[va], fold_cfg, tracker)
         fold_metrics.append(metrics)
-        print(f"Fold {i + 1} - Acc: {metrics['acc']:.4f}, F1: {metrics['f1']:.4f}, ROC-AUC: {metrics['roc_auc']:.4f}")
+        print(
+            f"Fold {i + 1} - Acc: {metrics['acc']:.4f}, F1: {metrics['f1']:.4f}, ROC-AUC: {metrics['roc_auc']:.4f}"
+        )
 
     avg = pd.DataFrame(fold_metrics).mean()
     print("\n" + "=" * 50)
     print(f"Mode: {args.mode}")
-    print(f"Avg Accuracy: {avg['acc']:.4f}, Avg F1: {avg['f1']:.4f}, Avg ROC-AUC: {avg['roc_auc']:.4f}")
+    print(
+        f"Avg Accuracy: {avg['acc']:.4f}, Avg F1: {avg['f1']:.4f}, Avg ROC-AUC: {avg['roc_auc']:.4f}"
+    )
     print("=" * 50)
     print("\nTraining complete.\n")
 
